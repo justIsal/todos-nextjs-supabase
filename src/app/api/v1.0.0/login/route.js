@@ -7,6 +7,7 @@ export async function POST(Request) {
   const { email, password } = body;
   const cookieStore = await cookies();
   const supabase = createClient(cookieStore);
+
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -14,20 +15,18 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
 
-    const res = await fetch('/api/v1.0.0/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+    const supabase = createClient();
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
 
-    const data = await res.json();
-
-    if (!res.ok) {
-      setError(data.error || 'Login gagal');
+    if (error) {
+      setError(error.message || 'Login gagal');
       return;
     }
 
-    // Redirect ke halaman dashboard
     router.push('/admin');
   }
   // const handleLogout = async () => {
@@ -40,7 +39,6 @@ export default function LoginPage() {
         <div className="bg-white dark:bg-gray-800 shadow-lg rounded-lg px-8 pt-6 pb-8 mb-4 transition-colors duration-200">
           <div className="flex justify-between items-center mb-6">
             <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Login</h1>
-
           </div>
 
           {error && (
