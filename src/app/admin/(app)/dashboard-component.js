@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Plus, Check, X, Edit2, Trash2, User, LogOut, ImageIcon, Upload } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -18,6 +18,12 @@ export default function Dashboard({ user, initialTodos, token }) {
   const fileInputRef = useRef(null);
   const editFileInputRef = useRef(null);
   const router = useRouter();
+
+  const [toggleLoading, setToggleLoading] = useState(new Set());
+  const [deleteLoading, setDeleteLoading] = useState(new Set());
+  const [updateLoading, setUpdateLoading] = useState(false);
+
+  const [toasts, setToasts] = useState([]);
 
   const handleImageSelect = (file) => {
     if (!file) return;
@@ -42,7 +48,59 @@ export default function Dashboard({ user, initialTodos, token }) {
     reader.readAsDataURL(file);
   };
 
-  // API call untuk menambah todo
+  const Toast = ({ toast, onRemove }) => (
+    <div
+      className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg border-l-4 transform transition-all duration-300 ease-in-out ${
+        toast.type === 'success'
+          ? 'bg-green-50 dark:bg-green-900/20 border-green-500 text-green-800 dark:text-green-200'
+          : 'bg-red-50 dark:bg-red-900/20 border-red-500 text-red-800 dark:text-red-200'
+      } animate-in slide-in-from-right-full`}
+      style={{ marginTop: `${toast.index * 80}px` }}
+    >
+      <div className="flex items-start space-x-3">
+        <div className="flex-shrink-0">
+          {toast.type === 'success' ? (
+            <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+              <Check size={14} className="text-white" />
+            </div>
+          ) : (
+            <div className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center">
+              <X size={14} className="text-white" />
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium">{toast.title}</p>
+          {toast.message && <p className="text-sm opacity-90 mt-1">{toast.message}</p>}
+        </div>
+        <button
+          onClick={() => onRemove(toast.id)}
+          className="flex-shrink-0 p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+
+  const showToast = (type, title, message = '') => {
+    const id = Date.now() + Math.random();
+    const newToast = { id, type, title, message, index: toasts.length };
+
+    setToasts((prev) => [...prev, newToast]);
+
+    // Auto remove after 5 seconds
+    setTimeout(() => {
+      removeToast(id);
+    }, 5000);
+  };
+
+  const removeToast = (id) => {
+    setToasts((prev) =>
+      prev.filter((toast) => toast.id !== id).map((toast, index) => ({ ...toast, index }))
+    );
+  };
+
   const addTodo = async () => {
     if (!newTodo.trim()) return;
 
@@ -65,7 +123,6 @@ export default function Dashboard({ user, initialTodos, token }) {
 
       if (response.ok) {
         const { todo } = await response.json();
-        console.log('coba aya teu : ', todo);
         setTodos([todo, ...todos]);
         setNewTodo('');
         setNewTodoImage(null);
@@ -73,20 +130,29 @@ export default function Dashboard({ user, initialTodos, token }) {
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
+        showToast('success', 'Todo Created!', `"${todo.task}" has been added to your list.`);
       } else {
         const errorData = await response.json();
         console.error('Failed to add todo:', errorData.error);
-        alert('Failed to add todo: ' + errorData.error);
+        showToast(
+          'error',
+          'Failed to Create Todo',
+          errorData.error || 'Something went wrong while creating your todo.'
+        );
       }
     } catch (error) {
       console.error('Error adding todo:', error);
-      alert('Error adding todo');
+      showToast(
+        'error',
+        'Network Error',
+        'Unable to connect to the server. Please check your connection.'
+      );
     }
     setLoading(false);
   };
 
-  // API call untuk toggle todo
   const toggleTodo = async (id) => {
+    setToggleLoading((prev) => new Set([...prev, id]));
     try {
       const todo = todos.find((t) => t?.id === id);
       if (!todo) return;
@@ -106,18 +172,39 @@ export default function Dashboard({ user, initialTodos, token }) {
       if (response.ok) {
         const { todo: updatedTodo } = await response.json();
         setTodos(todos.map((t) => (t?.id === id ? updatedTodo : t)));
+        showToast(
+          'success',
+          updatedTodo.is_complete ? 'Todo Completed! 🎉' : 'Todo Reopened',
+          `"${updatedTodo.task}" has been ${
+            updatedTodo.is_complete ? 'marked as complete' : 'reopened'
+          }.`
+        );
       } else {
         const errorData = await response.json();
         console.error('Failed to toggle todo:', errorData.error);
+        showToast(
+          'error',
+          'Failed to Update Todo',
+          errorData.error || 'Unable to update todo status.'
+        );
       }
     } catch (error) {
       console.error('Error toggling todo:', error);
+      showToast('error', 'Network Error', 'Unable to connect to the server.');
+    } finally {
+      setToggleLoading((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     }
   };
 
-  // API call untuk hapus todo
   const deleteTodo = async (id) => {
     if (!confirm('Are you sure you want to delete this todo?')) return;
+
+    const todoToDelete = todos.find((t) => t?.id === id);
+    setDeleteLoading((prev) => new Set([...prev, id]));
 
     try {
       const response = await fetch(`/api/v1.0.0/todos/${id}`, {
@@ -129,14 +216,29 @@ export default function Dashboard({ user, initialTodos, token }) {
 
       if (response.ok) {
         setTodos(todos.filter((todo) => todo?.id !== id));
+        showToast(
+          'success',
+          'Todo Deleted',
+          `"${todoToDelete?.task || 'Todo'}" has been permanently removed.`
+        );
       } else {
         const errorData = await response.json();
         console.error('Failed to delete todo:', errorData.error);
-        alert('Failed to delete todo: ' + errorData.error);
+        showToast(
+          'error',
+          'Failed to Delete Todo',
+          errorData.error || 'Unable to delete the todo.'
+        );
       }
     } catch (error) {
       console.error('Error deleting todo:', error);
-      alert('Error deleting todo');
+      showToast('error', 'Network Error', 'Unable to connect to the server.');
+    } finally {
+      setDeleteLoading((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(id);
+        return newSet;
+      });
     }
   };
 
@@ -147,10 +249,10 @@ export default function Dashboard({ user, initialTodos, token }) {
     setEditImagePreview('');
   };
 
-  // API call untuk update todo
   const saveEdit = async () => {
     if (!editingText.trim()) return;
 
+    setUpdateLoading(true);
     try {
       const formData = new FormData();
       formData.append('task', editingText);
@@ -174,14 +276,21 @@ export default function Dashboard({ user, initialTodos, token }) {
         setEditingText('');
         setEditingImage(null);
         setEditImagePreview('');
+        showToast('success', 'Todo Updated! ✨', `Your changes have been saved successfully.`);
       } else {
         const errorData = await response.json();
         console.error('Failed to update todo:', errorData.error);
-        alert('Failed to update todo: ' + errorData.error);
+        showToast(
+          'error',
+          'Failed to Update Todo',
+          errorData.error || 'Unable to save your changes.'
+        );
       }
     } catch (error) {
       console.error('Error updating todo:', error);
-      alert('Error updating todo');
+      showToast('error', 'Network Error', 'Unable to connect to the server.');
+    } finally {
+      setUpdateLoading(false);
     }
   };
 
@@ -217,6 +326,15 @@ export default function Dashboard({ user, initialTodos, token }) {
       editFileInputRef.current.value = '';
     }
   };
+
+  const LoadingSpinner = ({ size = 16, className = '' }) => (
+    <div className={`inline-block animate-spin ${className}`}>
+      <div
+        className={`border-2 border-current border-t-transparent rounded-full`}
+        style={{ width: size, height: size }}
+      />
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -287,10 +405,19 @@ export default function Dashboard({ user, initialTodos, token }) {
               <button
                 onClick={addTodo}
                 disabled={loading || !newTodo.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors flex items-center space-x-2"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200 flex items-center space-x-2 disabled:cursor-not-allowed"
               >
-                <Plus size={16} />
-                <span>{loading ? 'Adding...' : 'Add'}</span>
+                {loading ? (
+                  <>
+                    <LoadingSpinner size={16} className="text-white" />
+                    <span>Creating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} />
+                    <span>Add Todo</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -353,13 +480,18 @@ export default function Dashboard({ user, initialTodos, token }) {
                 >
                   <button
                     onClick={() => toggleTodo(todo?.id)}
-                    className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors mt-1 ${
+                    disabled={toggleLoading.has(todo?.id)}
+                    className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-200 mt-1 ${
                       todo?.is_complete
                         ? 'bg-green-500 border-green-500 text-white'
                         : 'border-gray-300 dark:border-gray-500 hover:border-green-500'
-                    }`}
+                    } ${toggleLoading.has(todo?.id) ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    {todo?.is_complete && <Check size={12} />}
+                    {toggleLoading.has(todo?.id) ? (
+                      <LoadingSpinner size={12} className="text-current" />
+                    ) : (
+                      todo?.is_complete && <Check size={12} />
+                    )}
                   </button>
 
                   {/* Todo Image */}
@@ -388,9 +520,14 @@ export default function Dashboard({ user, initialTodos, token }) {
                         />
                         <button
                           onClick={saveEdit}
-                          className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900 rounded"
+                          disabled={updateLoading}
+                          className="p-1 text-green-600 hover:bg-green-100 dark:hover:bg-green-900 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                         >
-                          <Check size={16} />
+                          {updateLoading ? (
+                            <LoadingSpinner size={16} className="text-green-600" />
+                          ) : (
+                            <Check size={16} />
+                          )}
                         </button>
                         <button
                           onClick={cancelEdit}
@@ -467,9 +604,14 @@ export default function Dashboard({ user, initialTodos, token }) {
                         </button>
                         <button
                           onClick={() => deleteTodo(todo?.id)}
-                          className="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
+                          disabled={deleteLoading.has(todo?.id)}
+                          className="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200"
                         >
-                          <Trash2 size={14} />
+                          {deleteLoading.has(todo?.id) ? (
+                            <LoadingSpinner size={14} className="text-red-600" />
+                          ) : (
+                            <Trash2 size={14} />
+                          )}
                         </button>
                       </div>
                     </>
@@ -491,6 +633,10 @@ export default function Dashboard({ user, initialTodos, token }) {
           )}
         </div>
       </main>
+      {/* Toast Notifications */}
+      {toasts.map((toast) => (
+        <Toast key={toast.id} toast={toast} onRemove={removeToast} />
+      ))}
     </div>
   );
 }
