@@ -1,21 +1,12 @@
-import { createClient } from '@supabase/supabase-js';
+import createClient from '@/utils/supabase/api';
 import { NextResponse } from 'next/server';
 
 export async function GET(req) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      }
-    );
+    const supabase = createClient(req);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
     const { data: todos, error } = await supabase
       .from('todos')
@@ -34,19 +25,8 @@ export async function GET(req) {
 
 export async function POST(request) {
   try {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      }
-    );
-    const authHeader = request.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
+    const supabase = createClient(request);
+
     const formData = await request.formData();
     const headerImage = formData.get('headerImage');
     const task = formData.get('task');
@@ -68,7 +48,6 @@ export async function POST(request) {
     )}`;
     const fileName = `${Date.now()}_${headerImage.name}`;
     const filePath = `${folderPath}/${fileName}`;
-    console.log('file path', filePath);
 
     const { data, error: uploadError } = await supabase.storage
       .from('todos')
@@ -89,7 +68,6 @@ export async function POST(request) {
     }
 
     const image_url = publicUrlData.publicUrl;
-    console.log('image_url :', image_url);
     const { data: todo, error } = await supabase
       .from('todos')
       .insert([{ task, image_url }])
@@ -100,7 +78,7 @@ export async function POST(request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ jasdsd: 'image_url' }, { status: 201 });
+    return NextResponse.json({ todo }, { status: 201 });
   } catch (error) {
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }

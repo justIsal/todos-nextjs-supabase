@@ -1,53 +1,45 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Plus, Check, X, Edit2, Trash2, User, LogOut, ImageIcon, Upload } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 
-export default function Dashboard({ user, initialTodos }) {
+export default function Dashboard({ user, initialTodos, token }) {
   const [todos, setTodos] = useState(initialTodos);
   const [newTodo, setNewTodo] = useState('');
-  const [newTodoImage, setNewTodoImage] = useState('');
+  const [newTodoImage, setNewTodoImage] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editingText, setEditingText] = useState('');
-  const [editingImage, setEditingImage] = useState('');
+  const [editingImage, setEditingImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState('');
+  const [editImagePreview, setEditImagePreview] = useState('');
   const fileInputRef = useRef(null);
   const editFileInputRef = useRef(null);
   const router = useRouter();
 
-  // Handle image upload
-  const handleImageUpload = async (file, isEditing = false) => {
-    if (!file) return '';
+  const handleImageSelect = (file) => {
+    if (!file) return;
 
-    const formData = new FormData();
-    formData.append('image', file);
+    setNewTodoImage(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImagePreview(e.target.result);
+    };
+    reader.readAsDataURL(file);
+  };
 
-    try {
-      const response = await fetch('/api/v1.0.0/upload', {
-        method: 'POST',
-        body: formData,
-      });
+  // Handle image file selection for editing
+  const handleEditImageSelect = (file) => {
+    if (!file) return;
 
-      if (response.ok) {
-        const { imageUrl } = await response.json();
-        if (isEditing) {
-          setEditingImage(imageUrl);
-        } else {
-          setNewTodoImage(imageUrl);
-          setImagePreview(imageUrl);
-        }
-        return imageUrl;
-      } else {
-        console.error('Failed to upload image');
-        return '';
-      }
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      return '';
-    }
+    setEditingImage(file);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setEditImagePreview(e.target.result);
+    };
+    reader.readAsDataURL(file);
   };
 
   // API call untuk menambah todo
@@ -56,31 +48,39 @@ export default function Dashboard({ user, initialTodos }) {
 
     setLoading(true);
     try {
+      const formData = new FormData();
+      formData.append('task', newTodo);
+
+      if (newTodoImage) {
+        formData.append('headerImage', newTodoImage);
+      }
+
       const response = await fetch('/api/v1.0.0/todos', {
         method: 'POST',
+        body: formData,
         headers: {
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          task: newTodo,
-          image_url: newTodoImage,
-        }),
       });
 
       if (response.ok) {
         const { todo } = await response.json();
+        console.log('coba aya teu : ', todo);
         setTodos([todo, ...todos]);
         setNewTodo('');
-        setNewTodoImage('');
+        setNewTodoImage(null);
         setImagePreview('');
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
       } else {
-        console.error('Failed to add todo');
+        const errorData = await response.json();
+        console.error('Failed to add todo:', errorData.error);
+        alert('Failed to add todo: ' + errorData.error);
       }
     } catch (error) {
       console.error('Error adding todo:', error);
+      alert('Error adding todo');
     }
     setLoading(false);
   };
@@ -88,15 +88,27 @@ export default function Dashboard({ user, initialTodos }) {
   // API call untuk toggle todo
   const toggleTodo = async (id) => {
     try {
+      const todo = todos.find((t) => t?.id === id);
+      if (!todo) return;
+
+      const formData = new FormData();
+      formData.append('task', todo?.task);
+      formData.append('is_complete', (!todo.is_complete).toString());
+
       const response = await fetch(`/api/v1.0.0/todos/toggle/${id}`, {
         method: 'PATCH',
+        body: formData,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       if (response.ok) {
-        const { todo } = await response.json();
-        setTodos(todos.map((t) => (t.id === id ? todo : t)));
+        const { todo: updatedTodo } = await response.json();
+        setTodos(todos.map((t) => (t?.id === id ? updatedTodo : t)));
       } else {
-        console.error('Failed to toggle todo');
+        const errorData = await response.json();
+        console.error('Failed to toggle todo:', errorData.error);
       }
     } catch (error) {
       console.error('Error toggling todo:', error);
@@ -105,25 +117,34 @@ export default function Dashboard({ user, initialTodos }) {
 
   // API call untuk hapus todo
   const deleteTodo = async (id) => {
+    if (!confirm('Are you sure you want to delete this todo?')) return;
+
     try {
       const response = await fetch(`/api/v1.0.0/todos/${id}`, {
         method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       if (response.ok) {
-        setTodos(todos.filter((todo) => todo.id !== id));
+        setTodos(todos.filter((todo) => todo?.id !== id));
       } else {
-        console.error('Failed to delete todo');
+        const errorData = await response.json();
+        console.error('Failed to delete todo:', errorData.error);
+        alert('Failed to delete todo: ' + errorData.error);
       }
     } catch (error) {
       console.error('Error deleting todo:', error);
+      alert('Error deleting todo');
     }
   };
 
   const startEditing = (todo) => {
-    setEditingId(todo.id);
-    setEditingText(todo.task || todo.title || '');
-    setEditingImage(todo.image_url || '');
+    setEditingId(todo?.id);
+    setEditingText(todo?.task || '');
+    setEditingImage(null);
+    setEditImagePreview('');
   };
 
   // API call untuk update todo
@@ -131,35 +152,44 @@ export default function Dashboard({ user, initialTodos }) {
     if (!editingText.trim()) return;
 
     try {
+      const formData = new FormData();
+      formData.append('task', editingText);
+
+      if (editingImage) {
+        formData.append('headerImage', editingImage);
+      }
+
       const response = await fetch(`/api/v1.0.0/todos/${editingId}`, {
         method: 'PUT',
+        body: formData,
         headers: {
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          task: editingText,
-          image_url: editingImage,
-        }),
       });
 
       if (response.ok) {
         const { todo } = await response.json();
-        setTodos(todos.map((t) => (t.id === editingId ? todo : t)));
+        setTodos(todos.map((t) => (t?.id === editingId ? todo : t)));
         setEditingId(null);
         setEditingText('');
-        setEditingImage('');
+        setEditingImage(null);
+        setEditImagePreview('');
       } else {
-        console.error('Failed to update todo');
+        const errorData = await response.json();
+        console.error('Failed to update todo:', errorData.error);
+        alert('Failed to update todo: ' + errorData.error);
       }
     } catch (error) {
       console.error('Error updating todo:', error);
+      alert('Error updating todo');
     }
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditingText('');
-    setEditingImage('');
+    setEditingImage(null);
+    setEditImagePreview('');
   };
 
   const handleLogout = async () => {
@@ -173,7 +203,7 @@ export default function Dashboard({ user, initialTodos }) {
   };
 
   const removeImage = () => {
-    setNewTodoImage('');
+    setNewTodoImage(null);
     setImagePreview('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -181,7 +211,8 @@ export default function Dashboard({ user, initialTodos }) {
   };
 
   const removeEditingImage = () => {
-    setEditingImage('');
+    setEditingImage(null);
+    setEditImagePreview('');
     if (editFileInputRef.current) {
       editFileInputRef.current.value = '';
     }
@@ -205,7 +236,12 @@ export default function Dashboard({ user, initialTodos }) {
 
               <button
                 className="p-2 rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                onClick={handleLogout}
+                onClick={() => {
+                  const confirmLogout = window.confirm('Yakin ingin logout?');
+                  if (confirmLogout) {
+                    handleLogout();
+                  }
+                }}
               >
                 <LogOut size={18} />
               </button>
@@ -232,7 +268,7 @@ export default function Dashboard({ user, initialTodos }) {
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Todo List</h3>
             <span className="text-sm text-gray-500 dark:text-gray-400">
-              {todos.filter((todo) => !todo.is_complete).length} of {todos.length} remaining
+              {todos.filter((todo) => !todo?.is_complete).length} of {todos.length} remaining
             </span>
           </div>
 
@@ -268,7 +304,7 @@ export default function Dashboard({ user, initialTodos }) {
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
-                      handleImageUpload(file);
+                      handleImageSelect(file);
                     }
                   }}
                   className="hidden"
@@ -282,11 +318,11 @@ export default function Dashboard({ user, initialTodos }) {
                 </button>
               </div>
 
-              {(imagePreview || newTodoImage) && (
+              {imagePreview && (
                 <div className="flex items-center space-x-2">
                   <div className="relative w-12 h-12 rounded-md overflow-hidden border border-gray-200 dark:border-gray-600">
                     <Image
-                      src={imagePreview || newTodoImage}
+                      src={imagePreview || '/placeholder.svg'}
                       alt="Preview"
                       fill
                       className="object-cover"
@@ -312,25 +348,25 @@ export default function Dashboard({ user, initialTodos }) {
             ) : (
               todos.map((todo) => (
                 <div
-                  key={todo.id}
+                  key={todo?.id}
                   className="flex items-start space-x-3 p-4 bg-gray-50 dark:bg-gray-700 rounded-md group hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
                 >
                   <button
-                    onClick={() => toggleTodo(todo.id)}
+                    onClick={() => toggleTodo(todo?.id)}
                     className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors mt-1 ${
-                      todo.is_complete
+                      todo?.is_complete
                         ? 'bg-green-500 border-green-500 text-white'
                         : 'border-gray-300 dark:border-gray-500 hover:border-green-500'
                     }`}
                   >
-                    {todo.is_complete && <Check size={12} />}
+                    {todo?.is_complete && <Check size={12} />}
                   </button>
 
                   {/* Todo Image */}
-                  {todo.image_url && (
+                  {todo?.image_url && (
                     <div className="flex-shrink-0 w-16 h-16 rounded-md overflow-hidden border border-gray-200 dark:border-gray-600">
                       <Image
-                        src={todo.image_url || '/placeholder.svg'}
+                        src={todo?.image_url || '/placeholder.svg'}
                         alt="Todo image"
                         width={64}
                         height={64}
@@ -339,7 +375,7 @@ export default function Dashboard({ user, initialTodos }) {
                     </div>
                   )}
 
-                  {editingId === todo.id ? (
+                  {editingId === todo?.id ? (
                     <div className="flex-1 space-y-3">
                       <div className="flex space-x-2">
                         <input
@@ -364,7 +400,6 @@ export default function Dashboard({ user, initialTodos }) {
                         </button>
                       </div>
 
-                      {/* Edit Image */}
                       <div className="flex items-center space-x-2">
                         <input
                           ref={editFileInputRef}
@@ -373,7 +408,7 @@ export default function Dashboard({ user, initialTodos }) {
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              handleImageUpload(file, true);
+                              handleEditImageSelect(file);
                             }
                           }}
                           className="hidden"
@@ -386,11 +421,12 @@ export default function Dashboard({ user, initialTodos }) {
                           <span>Change Image</span>
                         </button>
 
-                        {editingImage && (
+                        {(editImagePreview ||
+                          (editingId === todo?.id && todo?.image_url && !editingImage)) && (
                           <>
                             <div className="relative w-8 h-8 rounded overflow-hidden border border-gray-200 dark:border-gray-600">
                               <Image
-                                src={editingImage || '/placeholder.svg'}
+                                src={editImagePreview || todo?.image_url}
                                 alt="Edit preview"
                                 fill
                                 className="object-cover"
@@ -411,12 +447,12 @@ export default function Dashboard({ user, initialTodos }) {
                       <div className="flex-1">
                         <span
                           className={`block text-gray-900 dark:text-gray-100 ${
-                            todo.is_complete ? 'line-through text-gray-500 dark:text-gray-400' : ''
+                            todo?.is_complete ? 'line-through text-gray-500 dark:text-gray-400' : ''
                           }`}
                         >
-                          {todo.task || todo.title || `Todo ${todo.id}`}
+                          {todo?.task || `Todo ${todo?.id}`}
                         </span>
-                        {todo.image_url && (
+                        {todo?.image_url && (
                           <span className="text-xs text-gray-500 dark:text-gray-400 mt-1 block">
                             📷 Has image
                           </span>
@@ -430,7 +466,7 @@ export default function Dashboard({ user, initialTodos }) {
                           <Edit2 size={14} />
                         </button>
                         <button
-                          onClick={() => deleteTodo(todo.id)}
+                          onClick={() => deleteTodo(todo?.id)}
                           className="p-1 text-red-600 hover:bg-red-100 dark:hover:bg-red-900 rounded"
                         >
                           <Trash2 size={14} />
@@ -443,14 +479,13 @@ export default function Dashboard({ user, initialTodos }) {
             )}
           </div>
 
-          {/* Stats */}
           {todos.length > 0 && (
             <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-600">
               <div className="flex justify-between text-sm text-gray-500 dark:text-gray-400">
                 <span>Total: {todos.length}</span>
-                <span>Complete: {todos.filter((todo) => todo.is_complete).length}</span>
-                <span>Remaining: {todos.filter((todo) => !todo.is_complete).length}</span>
-                <span>With Images: {todos.filter((todo) => todo.image_url).length}</span>
+                <span>Complete: {todos.filter((todo) => todo?.is_complete).length}</span>
+                <span>Remaining: {todos.filter((todo) => !todo?.is_complete).length}</span>
+                <span>With Images: {todos.filter((todo) => todo?.image_url).length}</span>
               </div>
             </div>
           )}

@@ -19,5 +19,11 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return <Dashboard user={user?.user_metadata} initialTodos={todos || []} />;
+  return (
+    <Dashboard
+      user={user?.user_metadata}
+      initialTodos={todos || []}
+      token={session?.access_token}
+    />
+  );
 }

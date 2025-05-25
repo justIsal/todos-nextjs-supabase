@@ -1,12 +1,11 @@
-import { createClient } from '@/utils/supabase/server';
+import createClient from '@/utils/supabase/api';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 // PATCH - Toggle status is_complete todo
 export async function PATCH(request, { params }) {
   try {
-    const cookieStore = await cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = createClient(request);
     const { id } = await params;
 
     // Ambil todo saat ini
